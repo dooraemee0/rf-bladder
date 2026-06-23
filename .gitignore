@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+# local data / outputs (never commit clinical data)
+*.csv
+converted_csv/
+grid_results*/
+reproduce_*/
+*.png
+!figures/*.png
+# keep the released checkpoint, ignore other large files
+*.pt
+!checkpoints/best_model.pt
