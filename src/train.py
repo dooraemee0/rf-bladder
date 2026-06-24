@@ -11,7 +11,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import itertools
 
 from dataloader import FolderDataset, PreprocessTransform, load_full_dataframe
-from model import RFStudent
+from model import RFNet
 
 def set_seed(seed=42):
     import random
@@ -113,7 +113,7 @@ for i, combo in enumerate(param_combinations):
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 
-    model = RFStudent(dropout_p=params['dropout_p']).to(device)
+    model = RFNet(dropout_p=params['dropout_p']).to(device)
     criterion = nn.HuberLoss(delta=params['delta'])
     optimizer = optim.AdamW(model.parameters(), lr=params['lr'], weight_decay=params['weight_decay'])
 

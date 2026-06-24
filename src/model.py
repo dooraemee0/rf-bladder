@@ -33,7 +33,7 @@ class RFSingleEncoder(nn.Module):
         return features
 
 
-class RFStudent(nn.Module):
+class RFNet(nn.Module):
     """
     단순화된 RF Student 모델.
     - 각 RF 채널별 독립 인코더 사용
@@ -83,7 +83,7 @@ class RFStudent(nn.Module):
 
 
 if __name__ == '__main__':
-    model = RFStudent(dropout_p=0.5)
+    model = RFNet(dropout_p=0.5)
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total trainable parameters: {total_params:,}")
 

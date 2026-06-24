@@ -4,7 +4,7 @@ Reference implementation for the clinical (SNUH) bladder-volume regression
 model described in our paper, *"Lightweight Domain-Adaptive Deep Learning for
 Bladder Volume Estimation via Direct RF Signal Processing."*
 
-The model (**RFStudent**) estimates bladder volume **directly from raw
+The model (**RFNet**) estimates bladder volume **directly from raw
 seven-channel RF ultrasound** (three horizontal + four sagittal channels),
 with no B-mode image reconstruction. Each channel is encoded by an independent
 1D-CNN; the seven embeddings are concatenated and regressed to a scalar volume.
@@ -37,7 +37,7 @@ restricted to samples with volume ≤ 700 mL, as in `src/test.py`.
 ```
 rf-bladder/
 ├── src/
-│   ├── model.py            # RFStudent (per-channel 1D-CNN encoders + regressor)
+│   ├── model.py            # RFNet (per-channel 1D-CNN encoders + regressor)
 │   ├── dataloader.py       # RF CSV loading + preprocessing + channel-select augmentation
 │   ├── train.py            # original training driver (grid over hyperparameters)
 │   ├── train_reproduce.py  # single-config script reproducing the Table II model

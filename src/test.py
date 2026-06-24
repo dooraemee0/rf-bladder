@@ -11,7 +11,7 @@ from sklearn.metrics import (
 import matplotlib.pyplot as plt
 
 from dataloader import FolderDataset, PreprocessTransform, load_full_dataframe
-from model import RFStudent
+from model import RFNet
 
 # ===== 시드 고정 =====
 def set_seed(seed=42):
@@ -61,7 +61,7 @@ class AugmentedTestDataset(Dataset):
         return self.dataset[idx]
 
 # ===== 모델 로드 =====
-model = RFStudent().to(DEVICE)
+model = RFNet().to(DEVICE)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.eval()
 
