@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from dataloader import FolderDataset, PreprocessTransform, load_full_dataframe
 from model import RFNet
 
-# ===== 시드 고정 =====
+# ===== Seed Initialization =====
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -24,29 +24,29 @@ def set_seed(seed=42):
 
 set_seed(42)
 
-# ===== 설정 =====
+# ===== Configuration =====
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 16
 USE_LOG1P = False
 SAVE_DIR = "{address}"
-DATA_PATH = "{address}"
-EXCEL_PATH = "{address}"
+DATA_PATH ="{address}"
+EXCEL_PATH ="{address}"
 MODEL_PATH = os.path.join(SAVE_DIR, "best_model.pt")
 TEST_IDX_PATH = "{address}"
 
-# ===== 테스트 인덱스 불러오기 =====
+# ===== Load Test Indices =====
 df = load_full_dataframe(EXCEL_PATH)
 df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
 df.dropna(subset=['volume'], inplace=True)
 df['original_index'] = df.index
 
 if not os.path.exists(TEST_IDX_PATH):
-    print("test_idx.pt 파일이 없습니다. train.py 실행 후 테스트하세요.")
+    print("test_idx.pt not found. Please run train.py first.")
     exit()
 
 test_idx = torch.load(TEST_IDX_PATH)
 
-# ===== 증강된 테스트셋 클래스 =====
+# ===== Augmented Test Dataset Class =====
 class AugmentedTestDataset(Dataset):
     def __init__(self, df, data_path, test_idx, seed_offset):
         self.df = df.iloc[test_idx].reset_index(drop=True)
@@ -60,12 +60,12 @@ class AugmentedTestDataset(Dataset):
     def __getitem__(self, idx):
         return self.dataset[idx]
 
-# ===== 모델 로드 =====
+# ===== Load Model =====
 model = RFNet().to(DEVICE)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.eval()
 
-# ===== 두 번 증강 후 평균 예측 =====
+# ===== Predict with 2x Augmentation and Average =====
 all_preds_1, all_preds_2, all_targets = [], [], []
 
 for seed_offset in [0, 1000]:
@@ -95,28 +95,28 @@ for seed_offset in [0, 1000]:
     else:
         all_preds_2 = current_preds
 
-# ===== 평균 결과 계산 =====
+# ===== Compute Averaged Results =====
 final_preds = (np.array(all_preds_1) + np.array(all_preds_2)) / 2
 final_targets = np.array(all_targets)
 
-# ===== 600ml 이하만 필터링 =====
+# ===== Filter to ≤700ml =====
 mask = final_targets <= 700
 final_preds = final_preds[mask]
 final_targets = final_targets[mask]
 
-# ===== 회귀 평가 =====
+# ===== Regression Evaluation =====
 mae = mean_absolute_error(final_targets, final_preds)
 rmse = np.sqrt(mean_squared_error(final_targets, final_preds))
 r2 = r2_score(final_targets, final_preds)
 within_50 = np.mean(np.abs(final_preds - final_targets) <= 50) * 100
 
-print("\n===== 회귀 기반 평가 (≤700ml) =====")
+print("\n===== Regression Evaluation (≤700ml) =====")
 print(f"MAE        : {mae:.2f}")
 print(f"RMSE       : {rmse:.2f}")
 print(f"R²         : {r2:.4f}")
-print(f"±50 정확도 : {within_50:.2f}%")
+print(f"±50 Accuracy   : {within_50:.2f}%")
 
-# ===== 산점도 시각화 =====
+# ===== Scatter Plot Visualization =====
 plt.figure(figsize=(6, 6))
 plt.scatter(final_targets, final_preds, alpha=0.6, label='Predictions')
 plt.plot([min(final_targets), max(final_targets)], [min(final_targets), max(final_targets)], 'k--', label='Ideal (y=x)')
@@ -131,8 +131,8 @@ plt.tight_layout()
 plt.savefig(os.path.join(SAVE_DIR, "scatter_testset_filtered.png"))
 plt.close()
 
-# ===== 클래스 기반 평가 (50ml 단위) =====
+# ===== Class-based Evaluation (50ml bins) =====
 acc = (1 - np.mean(abs(final_preds-final_targets)/final_targets)) * 100
 
-print("\n===== 클래스 분류 평가 (≤700ml) =====")
+print("\n===== Class-wise Evaluation (≤700ml) =====")
 print(f"Accuracy (exact)    : {acc:.2f}%")

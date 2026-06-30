@@ -11,9 +11,6 @@ def load_full_dataframe(path):
     return pd.read_csv(path)
 
 class PreprocessTransform:
-    """
-    RF 데이터 전처리를 위한 클래스.
-    """
     def __init__(self, num_select, sigma=1, downsample_rate=10, max_len=400, seed_offset=0):
         self.num_select = num_select
         self.sigma = sigma
@@ -43,10 +40,6 @@ class PreprocessTransform:
         return np.stack(selected)
 
 class FolderDataset(Dataset):
-    """
-    RF 데이터를 위한 효율적인 커스텀 Dataset 클래스.
-    train.py에서 사전 필터링된 유효한 데이터프레임을 받는 것을 가정합니다.
-    """
     def __init__(self, dataframe, folder_path, transform_h=None, transform_s=None, max_depth=4000):
         self.database = dataframe
         self.folder_path = folder_path
@@ -58,10 +51,10 @@ class FolderDataset(Dataset):
         return len(self.database)
 
     def __getitem__(self, idx):
-        # train.py에서 reset_index()를 했으므로 iloc 사용
+        # Use iloc since reset_index() was called in train.py
         row = self.database.iloc[idx]
-        
-        # glob.glob은 리스트를 반환하므로 첫 번째 요소를 사용
+
+        # glob.glob returns a list, so use the first element
         h_file = glob.glob(os.path.join(self.folder_path, row['Upright_H'] + '*.csv'))[0]
         s_file = glob.glob(os.path.join(self.folder_path, row['Upright_S'] + '*.csv'))[0]
 
@@ -71,10 +64,10 @@ class FolderDataset(Dataset):
         s_df = pd.read_csv(s_file, header=None, low_memory=False)
         s_data = s_df.apply(pd.to_numeric, errors='coerce').fillna(0).to_numpy()[:self.max_depth, :]
 
-        # train.py에서 저장한 원본 인덱스를 사용
+        # Use the original index saved in train.py
         original_index = row['original_index']
 
-        # 매 호출 시 다른 증강을 위해 랜덤 시드 사용
+        # Use a random seed for different augmentations on each call
         seed = np.random.randint(0, 100000) 
 
         if self.transform_h:
