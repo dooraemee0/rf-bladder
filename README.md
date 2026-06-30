@@ -9,8 +9,9 @@ seven-channel RF ultrasound** (three horizontal + four sagittal channels),
 with no B-mode image reconstruction. Each channel is encoded by an independent
 1D-CNN; the seven embeddings are concatenated and regressed to a scalar volume.
 
-This repository contains the code and the trained checkpoint needed to
-**reproduce the clinical-cohort result** (Table II in the paper).
+This repository contains the code, the trained checkpoint, and the held-out
+test split needed to **reproduce the clinical-cohort result** (Table II in the
+paper).
 
 ## Results (clinical SNUH cohort, held-out test set)
 
@@ -20,6 +21,7 @@ This repository contains the code and the trained checkpoint needed to
 | RMSE | 42.12 mL |
 | R² | 0.901 |
 | ±50 mL accuracy | 82.35 % |
+| Volume-class accuracy | 87.81 % |
 
 Evaluation uses two-pass channel-randomized augmentation (averaged) and is
 restricted to samples with volume ≤ 700 mL, as in `src/test.py`.
@@ -39,11 +41,13 @@ rf-bladder/
 ├── src/
 │   ├── model.py            # RFNet (per-channel 1D-CNN encoders + regressor)
 │   ├── dataloader.py       # RF CSV loading + preprocessing + channel-select augmentation
-│   ├── train.py            # original training driver (grid over hyperparameters)
-│   ├── train_reproduce.py  # single-config script reproducing the Table II model
+│   ├── train.py            # training driver (stratified split, saves checkpoint + test_idx)
 │   └── test.py             # evaluation (2x aug averaging, ≤700 mL filter)
 ├── checkpoints/
-│   └── best_model.pt       # trained weights for the Table II result
+│   ├── best_model.pt       # trained weights for the Table II result
+│   └── test_idx.pt         # held-out test indices for the Table II split
+├── figures/
+│   └── scatter_testset_filtered.png   # predicted vs. actual on the test set
 ├── requirements.txt
 └── README.md
 ```
@@ -59,35 +63,42 @@ Tested with Python 3.8 and PyTorch (CUDA optional; CPU works for inference).
 
 ## Reproducing the reported result
 
-### Option A — verify with the released checkpoint (recommended, fastest)
+### Verify with the released checkpoint (recommended)
 
-The checkpoint in `checkpoints/best_model.pt` is the exact model behind Table II.
-Point `test.py` at it and run:
+The checkpoint in `checkpoints/best_model.pt` is the exact model behind Table II,
+and `checkpoints/test_idx.pt` is its held-out test split. Both are resolved
+automatically by `test.py` (relative to the repository), so you only need to
+point the script at your local copy of the clinical data:
 
-1. Edit the paths near the top of `src/test.py`:
+1. Edit the two clinical-data paths near the top of `src/test.py`:
    - `DATA_PATH`  → directory of converted RF CSV files (one CSV per acquisition,
      shape `(4160 samples, 384 scan lines)`).
    - `EXCEL_PATH` → `Z_volume_selection.csv` (columns `id, Upright_H, Upright_S,
      volume, ...`).
-   - `SAVE_DIR`   → directory containing `best_model.pt`.
-   - `TEST_IDX_PATH` → matching `test_idx.pt` (held-out split; see below).
+
+   The model and test-split paths (`checkpoints/best_model.pt`,
+   `checkpoints/test_idx.pt`) are already wired up and do not need editing.
 2. Run:
    ```bash
    cd src
    python test.py
    ```
 
-`test_idx.pt` stores the held-out test indices (as `original_index` values from
-the dataframe). It is produced by the training scripts; if you only have the
-checkpoint, regenerate the split with `train_reproduce.py` (same seed) to obtain
-an identical `test_idx.pt`.
+This regenerates the scatter plot in `figures/` and prints the metrics above.
+`test_idx.pt` stores the held-out test indices as `original_index` values from
+the index CSV, so the evaluation uses exactly the split behind the reported
+numbers.
 
-### Option B — retrain from scratch
+### Retrain from scratch (optional)
+
+`src/train.py` reproduces the training run end to end. It uses the same
+stratified split and seed, writes a fresh `best_model.pt`, and saves the
+corresponding `test_idx.pt` into its own output directory (it does **not**
+overwrite the released checkpoint):
 
 ```bash
 cd src
-python train_reproduce.py     # writes best_model.pt + test_idx.pt to its SAVE_DIR
-python test.py                # point SAVE_DIR/TEST_IDX_PATH at that folder
+python train.py
 ```
 
 Recovered training configuration (Table II model):
@@ -105,7 +116,7 @@ Recovered training configuration (Table II model):
 
 > Exact bit-for-bit reproduction can vary with library versions, GPU
 > nondeterminism, and the stochastic channel-selection augmentation. For an
-> exact match, use the released checkpoint (Option A).
+> exact match to Table II, use the released checkpoint.
 
 ## Data format
 
