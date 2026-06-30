@@ -12,3 +12,4 @@ reproduce_*/
 # keep the released checkpoint, ignore other large files
 *.pt
 !checkpoints/best_model.pt
+!checkpoints/test_idx.pt

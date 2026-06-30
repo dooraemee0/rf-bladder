@@ -26,7 +26,7 @@ set_seed(42)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# ========================= 실험 파라미터 조합 =========================
+# ========================= Experiment Parameter Grid =========================
 param_grid = {
     "lr": [1e-3],
     "weight_decay": [1e-2],
@@ -37,7 +37,7 @@ param_grid = {
 param_combinations = list(itertools.product(*param_grid.values()))
 param_names = list(param_grid.keys())
 
-# ========================= 고정 설정 =========================
+# ========================= Fixed Configuration =========================
 EPOCHS = 100
 BATCH_SIZE = 16
 TRAIN_RATIO = 0.6
@@ -48,7 +48,7 @@ EXCEL_PATH = "{address}"
 BASE_SAVE_DIR = "./grid_results"
 os.makedirs(BASE_SAVE_DIR, exist_ok=True)
 
-# ========================= 공통 전처리 및 분할 =========================
+# ========================= Common Preprocessing and Split =========================
 df_initial = load_full_dataframe(EXCEL_PATH)
 df_initial['volume'] = pd.to_numeric(df_initial['volume'], errors='coerce')
 df_initial.dropna(subset=['volume'], inplace=True)
@@ -72,13 +72,13 @@ val_test_bins = pd.cut(val_test_df['volume'], bins=5, labels=False, include_lowe
 bin_counts = val_test_bins.value_counts()
 
 if (bin_counts < 2).any():
-    print("Stratification Error 방지: 최소 클래스 멤버가 2개 미만인 구간이 있어 복제합니다.")
+    print("Stratification warning: bins with fewer than 2 members found. Duplicating rows.")
     rows_to_add = []
     for bin_val in bin_counts[bin_counts < 2].index:
         idx_to_duplicate = val_test_bins[val_test_bins == bin_val].index[0]
         row_df = val_test_df.loc[[idx_to_duplicate]].copy()
         rows_to_add.append(row_df)
-        print(f"-> ID {val_test_df.loc[idx_to_duplicate]['original_index']} 복제")
+        print(f"-> Duplicating ID {val_test_df.loc[idx_to_duplicate]['original_index']}")
     val_test_df = pd.concat([val_test_df] + rows_to_add, ignore_index=True)
     val_test_bins = pd.cut(val_test_df['volume'], bins=5, labels=False, include_lowest=True)
 
@@ -91,13 +91,13 @@ transform_h = PreprocessTransform(num_select=3)
 transform_s = PreprocessTransform(num_select=4)
 full_dataset = FolderDataset(df, DATA_PATH, transform_h=transform_h, transform_s=transform_s)
 
-# ========================= 실험 반복 =========================
+# ========================= Experiment Loop =========================
 for i, combo in enumerate(param_combinations):
     params = dict(zip(param_names, combo))
     exp_name = f"lr{params['lr']}_wd{params['weight_decay']}_do{params['dropout_p']}_r{params['repeat_factor']}"
     save_dir = os.path.join(BASE_SAVE_DIR, exp_name)
     os.makedirs(save_dir, exist_ok=True)
-    print(f"\n==== 실험 {i+1}/{len(param_combinations)}: {exp_name} ====")
+    print(f"\n==== Experiment {i+1}/{len(param_combinations)}: {exp_name} ====")
 
     augmented_train_idx = []
     for idx in train_idx:
