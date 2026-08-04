@@ -47,18 +47,50 @@ if not os.path.exists(TEST_IDX_PATH):
 test_idx = torch.load(TEST_IDX_PATH)
 
 # ===== Augmented Test Dataset Class =====
+# NOTE (reproducibility fix): the previous version of this class delegated
+# to FolderDataset.__getitem__, which draws its per-sample augmentation seed
+# via `np.random.randint(0, 100000)` -- a call that consumes the *global*
+# NumPy RNG state. With num_workers>0, each DataLoader worker is a fork of
+# the main process and inherits an *independent copy* of that global state;
+# without an explicit per-worker reseed (this codebase has none), several
+# workers can end up drawing the same "random" numbers, and the exact
+# sequence depends on worker-to-index scheduling, prefetch timing, and OS
+# scheduling. None of that was logged, so the specific channel-selection
+# draw behind the historical Table II numbers (MAE 35.46 mL, R^2=0.901)
+# cannot be reconstructed after the fact -- confirmed by testing multiple
+# plausible worker-seed reconstructions, none of which reproduced the saved
+# per-sample predictions in figures/table2_reference/.
+#
+# This version seeds each sample deterministically from its own
+# `original_index`, independent of worker count, batch size, or call order.
+# Re-running this script now gives the SAME result every time and on every
+# machine -- but that result will generally differ from the historical
+# Table II point estimate (which came from one particular, unrecorded
+# random draw). For the exact frozen predictions behind Table II, see
+# figures/table2_reference/clinical_test_predictions_n17.csv.
 class AugmentedTestDataset(Dataset):
     def __init__(self, df, data_path, test_idx, seed_offset):
         self.df = df.iloc[test_idx].reset_index(drop=True)
-        self.transform_h = PreprocessTransform(num_select=3, seed_offset=seed_offset)
-        self.transform_s = PreprocessTransform(num_select=4, seed_offset=seed_offset)
-        self.dataset = FolderDataset(self.df, data_path, self.transform_h, self.transform_s)
+        self.data_path = data_path
+        self.transform_h = PreprocessTransform(num_select=3, seed_offset=0)
+        self.transform_s = PreprocessTransform(num_select=4, seed_offset=0)
+        self.seed_offset = seed_offset
+        # Reuse FolderDataset only for its file-loading logic; its own
+        # (non-deterministic) transform calls are bypassed below.
+        self.dataset = FolderDataset(self.df, data_path, transform_h=None, transform_s=None)
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        return self.dataset[idx]
+        sample = self.dataset[idx]
+        original_index = int(sample['index'])
+        seed = original_index + self.seed_offset
+        h = self.transform_h(sample['horizon'].numpy(), seed=seed)
+        s = self.transform_s(sample['sagittal'].numpy(), seed=seed)
+        sample['horizon'] = torch.tensor(h, dtype=torch.float32)
+        sample['sagittal'] = torch.tensor(s, dtype=torch.float32)
+        return sample
 
 # ===== Load Model =====
 model = RFNet().to(DEVICE)

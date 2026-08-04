@@ -4,6 +4,9 @@ __pycache__/
 .ipynb_checkpoints/
 # local data / outputs (never commit clinical data)
 *.csv
+# exception: aggregate volume/prediction numbers only (no RF signals, no
+# patient identifiers), kept as the frozen record behind Table II
+!figures/table2_reference/*.csv
 converted_csv/
 grid_results*/
 reproduce_*/

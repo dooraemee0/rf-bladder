@@ -42,12 +42,16 @@ rf-bladder/
 │   ├── model.py            # RFNet (per-channel 1D-CNN encoders + regressor)
 │   ├── dataloader.py       # RF CSV loading + preprocessing + channel-select augmentation
 │   ├── train.py            # training driver (stratified split, saves checkpoint + test_idx)
-│   └── test.py             # evaluation (2x aug averaging, ≤700 mL filter)
+│   ├── test.py             # live evaluation (2x aug averaging, ≤700 mL filter)
+│   ├── evaluate_clinical_bland_altman.py  # live evaluation + Bland-Altman (Supp. Fig. S2)
+│   └── verify_table2_frozen.py            # verifies Table II from the frozen predictions below
 ├── checkpoints/
 │   ├── best_model.pt       # trained weights for the Table II result
 │   └── test_idx.pt         # held-out test indices for the Table II split
 ├── figures/
-│   └── scatter_testset_filtered.png   # predicted vs. actual on the test set
+│   ├── scatter_testset_filtered.png   # predicted vs. actual on the test set
+│   └── table2_reference/
+│       └── clinical_test_predictions_n17.csv  # frozen per-sample predictions behind Table II
 ├── requirements.txt
 └── README.md
 ```
@@ -63,7 +67,27 @@ Tested with Python 3.8 and PyTorch (CUDA optional; CPU works for inference).
 
 ## Reproducing the reported result
 
-### Verify with the released checkpoint (recommended)
+### Verify the exact Table II numbers (recommended)
+
+```bash
+cd src
+python verify_table2_frozen.py
+```
+
+This reads `figures/table2_reference/clinical_test_predictions_n17.csv` --
+the model's saved per-sample output (actual volume, predicted volume, and
+both augmentation-pass predictions) from the run behind Table II -- and
+recomputes the regression metrics and Bland–Altman statistics directly from
+it. It requires no local copy of the clinical data and prints exactly:
+MAE 35.46 mL, RMSE 42.12 mL, R² = 0.901, ±50 mL accuracy 82.35%.
+
+This is a **verification of a recorded result**, not a fresh forward pass
+through the model. `best_model.pt` and `test_idx.pt` are provided so the
+architecture, checkpoint, and held-out split can all be inspected and used
+for a live run (below) -- but note the caveat before treating a live run as
+bit-for-bit identical to Table II.
+
+### Run the model live on your own copy of the clinical data
 
 The checkpoint in `checkpoints/best_model.pt` is the exact model behind Table II,
 and `checkpoints/test_idx.pt` is its held-out test split. Both are resolved
@@ -84,10 +108,31 @@ point the script at your local copy of the clinical data:
    python test.py
    ```
 
-This regenerates the scatter plot in `figures/` and prints the metrics above.
+This regenerates the scatter plot in `figures/` and prints fresh metrics.
 `test_idx.pt` stores the held-out test indices as `original_index` values from
 the index CSV, so the evaluation uses exactly the split behind the reported
-numbers.
+numbers -- but expect **MAE ≈ 45 mL / R² ≈ 0.81**, not 35.46 mL / 0.901.
+
+> **Why a live run doesn't match Table II exactly.** `test.py`'s
+> channel-selection augmentation is now seeded deterministically per sample
+> (from `original_index`), so re-running it gives the same result on every
+> machine and every run. But an earlier version of this script drew its
+> augmentation seed from the global NumPy RNG inside each DataLoader worker
+> -- not reproducible across runs (worker-fork/scheduling dependent) and
+> never logged. The specific channel draw behind the Table II numbers came
+> from that earlier, unrecorded run and cannot be reconstructed from the
+> checkpoint alone: we tested several plausible worker-seed reconstructions
+> (sequential single-stream, forked-worker round-robin, and variants)
+> against the saved per-sample predictions, and none matched -- one came
+> within 0.1 mL on a single sample before diverging sharply on every other
+> sample, consistent with coincidental correlation between adjacent RF scan
+> lines rather than a matching seed. `src/evaluate_clinical_bland_altman.py`
+> uses the same deterministic seeding as the fixed `test.py` and reproduces
+> the same ≈45 mL / 0.81 result. Both are still well above the
+> non-deep-learning baselines in Table 1, and remain useful as a live
+> regression check (e.g. after retraining, or on a new environment) -- they
+> are just not the audit trail for the exact published number, which is
+> `verify_table2_frozen.py` above.
 
 ### Retrain from scratch (optional)
 
