@@ -1,108 +1,185 @@
+#!/usr/bin/env python3
+"""Verify the recorded Stage 1 result from its frozen prediction artifact.
+
+This command reproduces the numerical result reported for the historical
+17-acquisition development evaluation. It intentionally does not perform a
+new model forward pass: the two stochastic scan-line draws used by that run
+were not logged, so they cannot be reconstructed from the checkpoint alone.
+
+The verifier uses only the Python standard library. It checks the SHA-256
+hashes of the prediction CSV, released checkpoint, and recorded split before
+recomputing MAE, RMSE, R2, within-50-mL accuracy, and Bland--Altman statistics.
+Any artifact or metric mismatch causes a non-zero exit status.
+
+Usage from the repository root:
+
+    python src/verify_table2_frozen.py
+    python src/verify_table2_frozen.py --json-out table2_verification.json
 """
-verify_table2_frozen.py -- Reproduce the exact Table II numbers (MAE 35.46 mL,
-RMSE 42.12 mL, R^2 0.901, +-50 mL acc 82.35%) from the frozen, verified
-per-sample predictions.
 
-Why this script exists (read this before treating the numbers below as a
-"live model evaluation"): the original Table II run selected its
-channel-selection augmentation via a seed drawn from the global NumPy RNG
-inside each DataLoader worker (see the history of src/test.py). That draw
-was never logged, and is not reconstructable from the checkpoint alone --
-we confirmed this by testing multiple plausible worker-seed reconstructions
-(sequential single-stream, forked-worker-with-round-robin-scheduling, and
-variations of both) against these exact per-sample values; none reproduced
-them, including one that landed within 0.1 mL on a single sample only to
-diverge sharply everywhere else, consistent with adjacent-scan-line
-correlation rather than a matching seed. src/test.py and
-src/evaluate_clinical_bland_altman.py have since been fixed to use
-deterministic per-sample seeding, but a deterministic scheme necessarily
-lands on a *different* specific channel draw than the original
-non-deterministic one, so a fresh forward pass now reproducibly gives
-~MAE 45 mL / R^2 0.81 instead -- not bit-identical to Table II.
+from __future__ import annotations
 
-This script instead verifies Table II directly from
-figures/table2_reference/clinical_test_predictions_n17.csv, which stores the
-model's actual saved output (actual volume, predicted volume, and both
-augmentation-pass predictions) for that specific historical run, for the
-same checkpoint (best_model.pt, md5 9d00bea8d44e4ecd3a682e01fe090a3f) and the
-same held-out split (test_idx.pt). It recomputes the regression metrics and
-Bland-Altman statistics from those saved numbers -- this is a verification
-of a real recorded result, not a re-derivation via a fresh forward pass.
-
-Usage:
-  cd src
-  python verify_table2_frozen.py
-"""
-import os
+import argparse
+import csv
+import hashlib
+import json
+import math
+import statistics
 from pathlib import Path
-
-import numpy as np
-import pandas as pd
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
-_THIS_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _THIS_DIR.parent
-CSV_PATH = _REPO_ROOT / "figures" / "table2_reference" / "clinical_test_predictions_n17.csv"
-OUT_DIR = _REPO_ROOT / "figures" / "table2_reference"
+from typing import Dict, Iterable, List
 
 
-def main():
-    if not CSV_PATH.exists():
-        raise FileNotFoundError(
-            f"{CSV_PATH} not found. This file ships with the repository under "
-            "figures/table2_reference/ -- if it's missing, your checkout is incomplete."
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MANIFEST_PATH = (
+    REPO_ROOT / "figures" / "table2_reference" / "table2_artifact_manifest.json"
+)
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def mean(values: Iterable[float]) -> float:
+    values = list(values)
+    if not values:
+        raise ValueError("Cannot compute a mean from an empty sequence")
+    return sum(values) / len(values)
+
+
+def compute_metrics(actual: List[float], predicted: List[float]) -> Dict[str, float]:
+    if len(actual) != len(predicted) or not actual:
+        raise ValueError("actual and predicted must be non-empty and equal length")
+
+    errors = [prediction - target for target, prediction in zip(actual, predicted)]
+    target_mean = mean(actual)
+    residual_sum_squares = sum(error * error for error in errors)
+    total_sum_squares = sum((target - target_mean) ** 2 for target in actual)
+    if total_sum_squares == 0:
+        raise ValueError("R2 is undefined because every target is identical")
+
+    bias = mean(errors)
+    error_sd = statistics.stdev(errors)
+    return {
+        "n": len(actual),
+        "mae_ml": mean(abs(error) for error in errors),
+        "rmse_ml": math.sqrt(residual_sum_squares / len(errors)),
+        "r2": 1.0 - residual_sum_squares / total_sum_squares,
+        "within_50_ml_pct": 100.0 * mean(abs(error) <= 50.0 for error in errors),
+        "bland_altman_bias_ml": bias,
+        "bland_altman_loa_lower_ml": bias - 1.96 * error_sd,
+        "bland_altman_loa_upper_ml": bias + 1.96 * error_sd,
+    }
+
+
+def assert_close(name: str, actual: float, expected: float, tolerance: float) -> None:
+    if not math.isclose(actual, expected, rel_tol=0.0, abs_tol=tolerance):
+        raise RuntimeError(
+            f"Metric mismatch for {name}: observed {actual:.12g}, "
+            f"expected {expected:.12g} (absolute tolerance {tolerance:g})"
         )
 
-    df = pd.read_csv(CSV_PATH)
-    actual = df["actual"].to_numpy(dtype=float)
-    pred = df["pred"].to_numpy(dtype=float)
-    n = len(df)
 
-    mae = mean_absolute_error(actual, pred)
-    rmse = np.sqrt(mean_squared_error(actual, pred))
-    r2 = r2_score(actual, pred)
-    acc50 = float(np.mean(np.abs(pred - actual) <= 50.0) * 100.0)
+def verify() -> Dict[str, object]:
+    if not MANIFEST_PATH.is_file():
+        raise FileNotFoundError(f"Missing release manifest: {MANIFEST_PATH}")
 
-    print("=" * 60)
-    print("Table II verification (frozen predictions)")
-    print("=" * 60)
-    print(f"n        : {n}")
-    print(f"MAE      : {mae:.2f} mL")
-    print(f"RMSE     : {rmse:.2f} mL")
-    print(f"R^2      : {r2:.4f}")
-    print(f"+-50 mL acc : {acc50:.2f}%")
-    print()
-    print("Expected (Table II / README): MAE 35.46 mL, RMSE 42.12 mL, "
-          "R^2 0.901, +-50 mL acc 82.35%")
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    verified_artifacts: Dict[str, Dict[str, object]] = {}
+    for relative_path, expected in manifest["artifacts"].items():
+        path = REPO_ROOT / relative_path
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing release artifact: {path}")
+        observed_hash = sha256(path)
+        observed_size = path.stat().st_size
+        if observed_hash != expected["sha256"]:
+            raise RuntimeError(
+                f"SHA-256 mismatch for {relative_path}: observed {observed_hash}, "
+                f"expected {expected['sha256']}"
+            )
+        if observed_size != expected["size_bytes"]:
+            raise RuntimeError(
+                f"Size mismatch for {relative_path}: observed {observed_size}, "
+                f"expected {expected['size_bytes']}"
+            )
+        verified_artifacts[relative_path] = {
+            "sha256": observed_hash,
+            "size_bytes": observed_size,
+        }
 
-    mean_volume = (actual + pred) / 2.0
-    diff = pred - actual
-    bias = float(np.mean(diff))
-    sd = float(np.std(diff, ddof=1))
-    loa_upper = bias + 1.96 * sd
-    loa_lower = bias - 1.96 * sd
-    print(f"\nBland-Altman: bias={bias:.2f} mL, LoA=[{loa_lower:.2f}, {loa_upper:.2f}] mL")
+    prediction_path = REPO_ROOT / manifest["prediction_artifact"]
+    with prediction_path.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    required_columns = {"actual", "pred"}
+    if not rows or not required_columns.issubset(rows[0]):
+        raise RuntimeError(
+            f"{prediction_path} must contain the columns {sorted(required_columns)}"
+        )
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(actual, pred, alpha=0.7, label="Predictions")
-    lims = [min(actual.min(), pred.min()), max(actual.max(), pred.max())]
-    ax.plot(lims, lims, "k--", label="Ideal (y=x)")
-    ax.plot(lims, [v + 50 for v in lims], "r--", alpha=0.7, label="±50 mL range")
-    ax.plot(lims, [v - 50 for v in lims], "r--", alpha=0.7)
-    ax.set_xlabel("Actual Volume (mL)")
-    ax.set_ylabel("Predicted Volume (mL)")
-    ax.set_title(f"Table II verification (n={n}, R²={r2:.3f}, MAE={mae:.2f} mL)")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / "table2_verified_scatter.png"
-    fig.savefig(out_path, dpi=200)
-    print(f"\nSaved: {out_path}")
+    actual = [float(row["actual"]) for row in rows]
+    predicted = [float(row["pred"]) for row in rows]
+    metrics = compute_metrics(actual, predicted)
+
+    expected_metrics = manifest["expected_metrics"]
+    if metrics["n"] != expected_metrics["n"]:
+        raise RuntimeError(
+            f"Row-count mismatch: observed {metrics['n']}, expected {expected_metrics['n']}"
+        )
+    tolerance = float(manifest["metric_absolute_tolerance"])
+    for name, expected_value in expected_metrics.items():
+        if name == "n":
+            continue
+        assert_close(name, float(metrics[name]), float(expected_value), tolerance)
+
+    return {
+        "status": "PASS",
+        "interpretation": manifest["interpretation"],
+        "metrics": metrics,
+        "verified_artifacts": verified_artifacts,
+        "manifest": str(MANIFEST_PATH.relative_to(REPO_ROOT)),
+        "manifest_sha256": sha256(MANIFEST_PATH),
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--json-out",
+        type=Path,
+        help="Optionally write the complete machine-readable verification result.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    result = verify()
+    metrics = result["metrics"]
+
+    print("Stage 1 frozen-result verification: PASS")
+    print(f"n                 : {metrics['n']}")
+    print(f"MAE               : {metrics['mae_ml']:.2f} mL")
+    print(f"RMSE              : {metrics['rmse_ml']:.2f} mL")
+    print(f"R2                : {metrics['r2']:.6f}")
+    print(f"Within 50 mL      : {metrics['within_50_ml_pct']:.2f}%")
+    print(f"Bland-Altman bias : {metrics['bland_altman_bias_ml']:.2f} mL")
+    print(
+        "Bland-Altman LoA  : "
+        f"[{metrics['bland_altman_loa_lower_ml']:.2f}, "
+        f"{metrics['bland_altman_loa_upper_ml']:.2f}] mL"
+    )
+    print(f"Manifest SHA-256  : {result['manifest_sha256']}")
+    print("Interpretation    : recorded-result verification; not a fresh forward pass")
+
+    if args.json_out:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print(f"JSON report       : {args.json_out}")
 
 
 if __name__ == "__main__":

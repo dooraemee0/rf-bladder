@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "result_name": "historical_stage1_17_acquisition_development_evaluation",
+  "interpretation": "Exact numerical verification of the recorded prediction artifact; this is not a fresh model forward pass.",
+  "prediction_artifact": "figures/table2_reference/clinical_test_predictions_n17.csv",
+  "metric_absolute_tolerance": 1e-10,
+  "expected_metrics": {
+    "n": 17,
+    "mae_ml": 35.460146735696235,
+    "rmse_ml": 42.12322889292203,
+    "r2": 0.9009502417103351,
+    "within_50_ml_pct": 82.35294117647058,
+    "bland_altman_bias_ml": -9.759753956514245,
+    "bland_altman_loa_lower_ml": -92.54645604475273,
+    "bland_altman_loa_upper_ml": 73.02694813172424
+  },
+  "artifacts": {
+    "figures/table2_reference/clinical_test_predictions_n17.csv": {
+      "sha256": "647f3a6c052cb2a4c02a7b67709571d8ce85389ea906b196ae9b2bdf73bffd4c",
+      "size_bytes": 1962
+    },
+    "checkpoints/best_model.pt": {
+      "sha256": "cfb8f0dd43387a59e53c6eba0eb32fa980b883198afee5da77cdba596de1d0d0",
+      "size_bytes": 26056818
+    },
+    "checkpoints/test_idx.pt": {
+      "sha256": "8e6a869594f18277426915f861837c3fc2c7817432f8219b9e15623c0f9e6ed8",
+      "size_bytes": 868
+    }
+  }
+}

@@ -9,11 +9,11 @@ seven-channel RF ultrasound** (three horizontal + four sagittal channels),
 with no B-mode image reconstruction. Each channel is encoded by an independent
 1D-CNN; the seven embeddings are concatenated and regressed to a scalar volume.
 
-This repository contains the code, the trained checkpoint, and the held-out
-test split needed to **reproduce the clinical-cohort result** (Table II in the
-paper).
+This repository contains the code, released checkpoint, recorded split, and
+frozen prediction artifact needed to verify the original clinical development
+result reported in Table II.
 
-## Results (clinical SNUH cohort, held-out test set)
+## Recorded Stage 1 result (17-acquisition development evaluation)
 
 | Metric | Value |
 |---|---|
@@ -23,8 +23,11 @@ paper).
 | ±50 mL accuracy | 82.35 % |
 | Volume-class accuracy | 87.81 % |
 
-Evaluation uses two-pass channel-randomized augmentation (averaged) and is
-restricted to samples with volume ≤ 700 mL, as in `src/test.py`.
+The historical evaluation used two channel-randomized scan-line draws per
+acquisition and averaged their predictions. The exact draw states were not
+recorded. Consequently, the numerical result below is reproduced from the
+released per-acquisition predictions rather than by claiming a bit-identical
+new checkpoint forward pass.
 
 > **Note on data.** The clinical RF dataset was collected at Seoul National
 > University Hospital under IRB No. H-2107-024-1233 and contains identifiable
@@ -47,11 +50,12 @@ rf-bladder/
 │   └── verify_table2_frozen.py            # verifies Table II from the frozen predictions below
 ├── checkpoints/
 │   ├── best_model.pt       # trained weights for the Table II result
-│   └── test_idx.pt         # held-out test indices for the Table II split
+│   └── test_idx.pt         # recorded evaluation indices for the Table II run
 ├── figures/
 │   ├── scatter_testset_filtered.png   # predicted vs. actual on the test set
 │   └── table2_reference/
-│       └── clinical_test_predictions_n17.csv  # frozen per-sample predictions behind Table II
+│       ├── clinical_test_predictions_n17.csv  # recorded predictions behind Table II
+│       └── table2_artifact_manifest.json      # expected metrics, sizes, and SHA-256 hashes
 ├── requirements.txt
 └── README.md
 ```
@@ -67,30 +71,28 @@ Tested with Python 3.8 and PyTorch (CUDA optional; CPU works for inference).
 
 ## Reproducing the reported result
 
-### Verify the exact Table II numbers (recommended)
+### Verify the exact reported numbers
+
+This verification requires only Python 3 and the files in this repository:
 
 ```bash
-cd src
-python verify_table2_frozen.py
+python src/verify_table2_frozen.py
 ```
 
-This reads `figures/table2_reference/clinical_test_predictions_n17.csv` --
-the model's saved per-sample output (actual volume, predicted volume, and
-both augmentation-pass predictions) from the run behind Table II -- and
-recomputes the regression metrics and Bland–Altman statistics directly from
-it. It requires no local copy of the clinical data and prints exactly:
-MAE 35.46 mL, RMSE 42.12 mL, R² = 0.901, ±50 mL accuracy 82.35%.
+The command verifies the SHA-256 hashes and byte sizes of the frozen prediction
+CSV, checkpoint, and recorded split before independently recomputing all
+metrics. It exits with an error if any artifact or result differs. The expected
+output is MAE 35.46 mL, RMSE 42.12 mL, R² 0.900950, and ±50 mL accuracy 82.35%.
+Use `--json-out PATH` to save a machine-readable verification report.
 
-This is a **verification of a recorded result**, not a fresh forward pass
-through the model. `best_model.pt` and `test_idx.pt` are provided so the
-architecture, checkpoint, and held-out split can all be inspected and used
-for a live run (below) -- but note the caveat before treating a live run as
-bit-for-bit identical to Table II.
+This is an exact **recorded-result verification**, not a fresh forward pass.
+The distinction matters because the original stochastic scan-line draw states
+were not logged.
 
 ### Run the model live on your own copy of the clinical data
 
-The checkpoint in `checkpoints/best_model.pt` is the exact model behind Table II,
-and `checkpoints/test_idx.pt` is its held-out test split. Both are resolved
+The checkpoint in `checkpoints/best_model.pt` is the released Stage 1 model,
+and `checkpoints/test_idx.pt` contains the recorded evaluation indices. Both are resolved
 automatically by `test.py` (relative to the repository), so you only need to
 point the script at your local copy of the clinical data:
 
@@ -109,8 +111,8 @@ point the script at your local copy of the clinical data:
    ```
 
 This regenerates the scatter plot in `figures/` and prints fresh metrics.
-`test_idx.pt` stores the held-out test indices as `original_index` values from
-the index CSV, so the evaluation uses exactly the split behind the reported
+`test_idx.pt` stores the evaluation indices as `original_index` values from
+the index CSV, so the evaluation uses the recorded split behind the reported
 numbers -- but expect **MAE ≈ 45 mL / R² ≈ 0.81**, not 35.46 mL / 0.901.
 
 > **Why a live run doesn't match Table II exactly.** `test.py`'s
